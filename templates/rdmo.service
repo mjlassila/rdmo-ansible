@@ -1,18 +1,18 @@
 [Unit]
-Description=RDMO {{ rdmo_service }} gunicorn daemon
+Description=RDMO gunicorn daemon
 After=network.target
 
 [Service]
 User={{ rdmo_user }}
-Group={{ rdmo_group }}
+Group={{ rdmo_user }}
 
-WorkingDirectory={{ rdmo_home }}/rdmo-app
+WorkingDirectory={{ rdmo_app_path }}
 
 LogsDirectory=gunicorn/{{ rdmo_service }} django/{{ rdmo_service }}
 RuntimeDirectory=gunicorn/{{ rdmo_service }}
 
-Environment=GUNICORN_BIN=env/bin/gunicorn
-Environment=GUNICORN_WORKER=3
+Environment=GUNICORN_BIN={{ rdmo_venv }}/bin/gunicorn
+Environment=GUNICORN_WORKER=1
 Environment=GUNICORN_TIMEOUT=30
 Environment=GUNICORN_BIND=unix:/run/gunicorn/{{ rdmo_service }}/rdmo.sock
 Environment=GUNICORN_PID_FILE=/run/gunicorn/{{ rdmo_service }}/rdmo.pid

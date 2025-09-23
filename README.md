@@ -1,36 +1,46 @@
-rdmo.jochenklar.de-ansible
-==========================
+rdmo-ansible
+============
 
-The ansible playbook to deploy <https://rdmo.jochenklar.de>.
+This repo contains an ansible playbook to deploy a "standard" instance of
+[RDMO](https://rdmorganiser.github.io) using PostgresSQL, Gunicorn and NGINX.
 
-It can be reused to deploy other instances of [RDMO](https://rdmorganiser.github.io) (with PostgresSQL and Gunicorn).
+The playbook performs the following steps:
 
-Please also note <https://github.com/rdmorganiser/rdmo-ansible> for a different approach.
+* Install distribution packages
+* Create rdmo user
+* Configure NGINX reverse proxy and obtain certificate using certbot
+* Configure Systemd service
+* Create PostgreSQL user and database
+* Clone rdmo-app
+* Install RDMO and dependencies in a virtual environment
+* Create a basic `config.settings.local.py` config file
+* Initialize RDMO
 
+Once the playbook finishes, RDMO should be available at the provided URL.
 
 Setup
 -----
 
-Create a `hosts` file with the hostname of your RDMO machine and the following variables:
+Create a `hosts.yml` file with the hostname of your RDMO machine and the following variables:
 
-```plain
-[rdmo]
-rdmo.jochenklar.de                   # the hostname for ansible
+```yml
+all:
+  hosts:
+    rdmo.jochenklar.dev:
+  vars:
+    rdmo_app: rdmo
+    rdmo_app_repo: https://github.com/rdmorganiser/rdmo-app
+    rdmo_app_path: /srv/rdmo/rdmo-app
+    rdmo_host: rdmo.jochenklar.dev
+    rdmo_dist: rdmo[allauth,postgres,openapi,gunicorn]
+    rdmo_user: rdmo
+    rdmo_home: /srv/rdmo
+    rdmo_venv: /srv/rdmo/rdmo-app/env
 
-[rdmo:vars]
-repository=https://github.com/jochenklar/rdmo.jochenklar.de
-requirements=rdmo[allauth,gunicorn,postgres]
+    certbot_email: admin@jochenklar.de
 
-local_py=local.py                    # the config/settings/local.py
-fixtures=fixtures.json               # a optional file with fixtures
-rdmo_service=rdmo.service            # the systemd service file
-nginx_conf=rdmo.conf                 # the nginx config file
-certbot_email=admin@jochenklar.de    # the email to register certbot with
-certbot_hostname=rdmo.jochenklar.de  # the hostname for the certificate
+    ansible_python_interpreter: auto_silent
 ```
-
-`local_py`, `fixtures`, `rdmo_service`, and `nginx_conf` are files, which should be placed in the `files` directory.
-
 
 Usage
 -----

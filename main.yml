@@ -2,17 +2,9 @@
 
 - hosts: all
 
-  vars:
-    rdmo_url: "{{ inventory_hostname }}"
-    rdmo_user: "{{ rdmo_instance }}"
-    rdmo_group: "{{ rdmo_instance }}"
-    rdmo_home: "/srv/{{ rdmo_instance }}"
-    rdmo_db: "rdmo_{{ rdmo_instance }}"
-    rdmo_service: "{{ rdmo_instance }}"
-
   tasks:
 
-  - name: Install prerequisites
+  - name: Install distribution packages
     apt:
       name:
       - build-essential
@@ -24,28 +16,61 @@
       - python3-venv
       - python3-psycopg2
       - git
+      - nginx
+      - postgresql
       - pandoc
       - texlive
       - texlive-xetex
       - lmodern
       - librsvg2-bin
-      - postgresql
-      - libpq-dev
-      - python3-psycopg2
-      - nginx
-      - certbot
-      - python3-certbot-nginx
-      update_cache: true
-    tags:
-    - prerequisites
+      state: latest
 
   - name: Create rdmo user
     user:
       name: "{{ rdmo_user }}"
-      group: "{{ rdmo_group }}"
-      password: "*"
       home: "{{ rdmo_home }}"
+      comment: "RDMO user"
       shell: /bin/bash
+      create_home: yes
+      state: present
+
+  # nginx
+
+  - name: Obtain certificate for {{ rdmo_host }}
+    command:
+      cmd: |
+        certbot certonly --standalone --nginx -d {{ rdmo_host }}
+        --non-interactive --agree-tos --email {{ certbot_email }}
+      creates: /etc/letsencrypt/live/{{ rdmo_host }}/cert.pem
+
+  - name: Deploy nginx config file
+    template:
+      src: templates/rdmo.conf
+      dest: "/etc/nginx/sites-available/{{ rdmo_host }}.conf"
+
+  - name: Enable nginx config file
+    file:
+      src: /etc/nginx/sites-available/{{ rdmo_host }}.conf
+      dest: /etc/nginx/sites-enabled/{{ rdmo_host }}.conf
+      state: link
+    notify: Restart nginx
+
+  # systemd
+
+  - name: Deploy systemd service file
+    template:
+      src: templates/rdmo.service
+      dest: "/etc/systemd/system/{{ rdmo_service }}.service"
+
+  - name: Create log directory
+    file:
+      path: "/var/log/django/{{ rdmo_service }}"
+      state: directory
+      owner: "{{ rdmo_user }}"
+      group: "{{ rdmo_user }}"
+      mode: '0755'
+
+  # postgres
 
   - name: Create rdmo postgres user
     become: true
@@ -58,55 +83,72 @@
     become: true
     become_user: postgres
     postgresql_db:
-      name: "{{ rdmo_db }}"
+      name: "{{ rdmo_dbname }}"
+      owner: "{{ rdmo_user }}"
 
-  - name: Clone the rdmo-app repository
-    become: true
+  # rdmo-app
+
+  - name: Clone rdmo-app repository
+    become: yes
     become_user: "{{ rdmo_user }}"
     git:
-      repo: "{{ rdmo_repository }}"
-      dest: "{{ rdmo_home }}/rdmo-app"
+      repo: "{{ rdmo_app_repo }}"
+      dest: "{{ rdmo_app_path }}"
+      version: main
       accept_hostkey: yes
 
-  - name: Copy config/settings/local.py
-    become: true
+  - name: Create virtual environment
+    become: yes
     become_user: "{{ rdmo_user }}"
-    template:
-      src: "local.py.j2"
-      dest: "{{ rdmo_home }}/rdmo-app/config/settings/local.py"
-      force: false
-    vars:
-      rdmo_secret_key: "{{ lookup('community.general.random_string', length=64) }}"
-    when: "lookup('ansible.builtin.fileglob', 'templates/local.py.j2') != []"
-
-  - name: Copy fixtures
-    become: true
-    become_user: "{{ rdmo_user }}"
-    template:
-      src: "fixtures.json.j2"
-      dest: "{{ rdmo_home }}/rdmo-app/fixtures.json"
-      force: false
-    when: "lookup('ansible.builtin.fileglob', 'templates/fixtures.json.j2') != []"
-
-  - name: Create Systemd service file
-    template:
-      src: templates/rdmo.service.j2
-      dest: /etc/systemd/system/{{ rdmo_service }}.service
-
-  - name: Obtain certificate for {{ rdmo_url }}
     command:
-      cmd: |
-        certbot certonly --standalone -d {{ rdmo_url }}
-        --non-interactive --agree-tos --email {{ certbot_email }}
-      creates: /etc/letsencrypt/live/{{ rdmo_url }}/cert.pem
+      cmd: "python3 -m venv {{ rdmo_venv }}"
+      creates: "{{ rdmo_venv }}/bin/activate"
 
-  - name: Create NGINX config file
+  - name: Upgrade pip inside virtualenv
+    become: yes
+    become_user: "{{ rdmo_user }}"
+    pip:
+      name: pip
+      state: latest
+      virtualenv: "{{ rdmo_venv }}"
+      virtualenv_command: "python3 -m venv"
+
+  - name: Install rdmo inside virtualenv
+    become: yes
+    become_user: "{{ rdmo_user }}"
+    pip:
+      name: "{{ rdmo_dist }}"
+      state: latest
+      virtualenv: "{{ rdmo_venv }}"
+      virtualenv_command: "python3 -m venv"
+
+  - name: Deploy local.py config file
+    become: yes
+    become_user: "{{ rdmo_user }}"
     template:
-      src: templates/rdmo.conf.j2
-      dest: /etc/nginx/sites-available/{{ rdmo_url }}.conf
+      src: templates/local.py
+      dest: "{{ rdmo_app_path }}/config/settings/local.py"
 
-  - name: Enable NGINX config file
-    file:
-      src: /etc/nginx/sites-available/{{ rdmo_url }}.conf
-      dest: /etc/nginx/sites-enabled/{{ rdmo_url }}.conf
-      state: link
+  # rdmo
+
+  - name: Init RDMO
+    become: yes
+    become_user: "{{ rdmo_user }}"
+    command:
+      cmd: "{{ rdmo_venv }}/bin/python {{ rdmo_app_path }}/manage.py upgrade"
+      creates: "{{ rdmo_app_path }}/static_root"
+    notify: Restart rdmo
+
+  handlers:
+
+  - name: Restart nginx
+    systemd:
+      name: nginx
+      state: restarted
+
+  - name: Restart rdmo
+    systemd:
+      name: "{{ rdmo_service }}"
+      enabled: true
+      daemon_reload: true
+      state: restarted
