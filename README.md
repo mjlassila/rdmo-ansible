@@ -1,7 +1,7 @@
 rdmo-ansible
 ============
 
-This repo contains an ansible playbook to deploy a "standard" instance of
+This repo contains an ansible playbook to deploy an instance of
 [RDMO](https://rdmorganiser.github.io) using PostgresSQL, Gunicorn and NGINX.
 
 The playbook performs the following steps:
@@ -13,15 +13,15 @@ The playbook performs the following steps:
 * Create PostgreSQL user and database
 * Clone rdmo-app
 * Install RDMO and dependencies in a virtual environment
-* Create a basic `config.settings.local.py` config file
+* Create a basic `config/settings/local.py` config file
 * Initialize RDMO
 
-Once the playbook finishes, RDMO should be available at the provided URL.
+Once the playbook has finished, RDMO should be available at the provided URL.
 
 Setup
 -----
 
-Create a `hosts.yml` file with the hostname of your RDMO machine and the following variables:
+Create a `hosts.yml` file with the hostname of your RDMO machine and other variables, e.g.:
 
 ```yml
 all:
@@ -36,6 +36,8 @@ all:
     rdmo_user: rdmo
     rdmo_home: /srv/rdmo
     rdmo_venv: /srv/rdmo/rdmo-app/env
+
+    django_secret_key: supersecretkey
 
     certbot_email: admin@jochenklar.de
 
