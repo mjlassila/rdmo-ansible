@@ -3,21 +3,21 @@ Description=RDMO gunicorn daemon
 After=network.target
 
 [Service]
-User={{ rdmo_user }}
-Group={{ rdmo_user }}
+User={{ rdmo_site.user | default(rdmo_user) }}
+Group={{ rdmo_site.user | default(rdmo_user) }}
 
-WorkingDirectory={{ rdmo_app_path }}
+WorkingDirectory={{ rdmo_site.app_path }}
 
-LogsDirectory=gunicorn/{{ rdmo_service }} django/{{ rdmo_service }}
-RuntimeDirectory=gunicorn/{{ rdmo_service }}
+LogsDirectory=gunicorn/{{ rdmo_site.service }} django/{{ rdmo_site.service }}
+RuntimeDirectory=gunicorn/{{ rdmo_site.service }}
 
-Environment=GUNICORN_BIN={{ rdmo_venv }}/bin/gunicorn
+Environment=GUNICORN_BIN={{ rdmo_site.venv | default(rdmo_venv) }}/bin/gunicorn
 Environment=GUNICORN_WORKER=1
 Environment=GUNICORN_TIMEOUT=30
-Environment=GUNICORN_BIND=unix:/run/gunicorn/{{ rdmo_service }}/rdmo.sock
-Environment=GUNICORN_PID_FILE=/run/gunicorn/{{ rdmo_service }}/rdmo.pid
-Environment=GUNICORN_ACCESS_LOG_FILE=/var/log/gunicorn/{{ rdmo_service }}/access.log
-Environment=GUNICORN_ERROR_LOG_FILE=/var/log/gunicorn/{{ rdmo_service }}/error.log
+Environment=GUNICORN_BIND=unix:/run/gunicorn/{{ rdmo_site.service }}/rdmo.sock
+Environment=GUNICORN_PID_FILE=/run/gunicorn/{{ rdmo_site.service }}/rdmo.pid
+Environment=GUNICORN_ACCESS_LOG_FILE=/var/log/gunicorn/{{ rdmo_site.service }}/access.log
+Environment=GUNICORN_ERROR_LOG_FILE=/var/log/gunicorn/{{ rdmo_site.service }}/error.log
 
 ExecStart=/bin/sh -c '${GUNICORN_BIN} \
   --workers ${GUNICORN_WORKER} \
