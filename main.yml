@@ -1,255 +1,262 @@
 ---
-
-- hosts: rhel9:almalinux9
+- name: Deploy RDMO sites
+  hosts: rhel9:almalinux9
 
   tasks:
+    - name: Configure RDMO sites from legacy variables
+      ansible.builtin.set_fact:
+        rdmo_sites_effective:
+          - host: "{{ rdmo_host }}"
+            service: "{{ rdmo_service }}"
+            app_repo: "{{ rdmo_app_repo }}"
+            app_path: "{{ rdmo_app_path }}"
+            dist: "{{ rdmo_dist }}"
+            user: "{{ rdmo_user }}"
+            home: "{{ rdmo_home }}"
+            venv: "{{ rdmo_venv }}"
+            dbname: "{{ rdmo_dbname }}"
+            django_secret_key: "{{ django_secret_key }}"
+      when: rdmo_sites is not defined
 
-  - name: Configure RDMO sites from legacy variables
-    set_fact:
-      rdmo_sites_effective:
-      - host: "{{ rdmo_host }}"
-        service: "{{ rdmo_service }}"
-        app_repo: "{{ rdmo_app_repo }}"
-        app_path: "{{ rdmo_app_path }}"
-        dist: "{{ rdmo_dist }}"
-        user: "{{ rdmo_user }}"
-        home: "{{ rdmo_home }}"
-        venv: "{{ rdmo_venv }}"
-        dbname: "{{ rdmo_dbname }}"
-        django_secret_key: "{{ django_secret_key }}"
-    when: rdmo_sites is not defined
+    - name: Configure RDMO sites
+      ansible.builtin.set_fact:
+        rdmo_sites_effective: "{{ rdmo_sites }}"
+      when: rdmo_sites is defined
 
-  - name: Configure RDMO sites
-    set_fact:
-      rdmo_sites_effective: "{{ rdmo_sites }}"
-    when: rdmo_sites is defined
+    - name: Configure unique RDMO virtual environments
+      ansible.builtin.set_fact:
+        rdmo_virtualenvs_effective: []
 
-  - name: Configure unique RDMO virtual environments
-    set_fact:
-      rdmo_virtualenvs_effective: []
+    - name: Add unique RDMO virtual environments
+      ansible.builtin.set_fact:
+        rdmo_virtualenvs_effective: >-
+          {{ rdmo_virtualenvs_effective + [{'venv': item.venv | default(rdmo_venv),
+          'user': item.user | default(rdmo_user), 'dist': item.dist | default(rdmo_dist)}] }}
+      when: (item.venv | default(rdmo_venv)) not in (rdmo_virtualenvs_effective | map(attribute='venv') | list)
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.venv | default(rdmo_venv) }}"
 
-  - name: Add unique RDMO virtual environments
-    set_fact:
-      rdmo_virtualenvs_effective: "{{ rdmo_virtualenvs_effective + [{'venv': item.venv | default(rdmo_venv), 'user': item.user | default(rdmo_user), 'dist': item.dist | default(rdmo_dist)}] }}"
-    when: (item.venv | default(rdmo_venv)) not in (rdmo_virtualenvs_effective | map(attribute='venv') | list)
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.venv | default(rdmo_venv) }}"
+    - name: Verify supported operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution in ['RedHat', 'AlmaLinux']
+          - ansible_distribution_major_version | int == 9
+        fail_msg: This playbook targets RHEL 9 or AlmaLinux 9 hosts.
+        success_msg: Target host is a supported RHEL 9 family system.
 
-  - name: Verify supported operating system
-    assert:
-      that:
-      - ansible_distribution in ['RedHat', 'AlmaLinux']
-      - ansible_distribution_major_version | int == 9
-      fail_msg: "This playbook targets RHEL 9 or AlmaLinux 9 hosts."
-      success_msg: "Target host is a supported RHEL 9 family system."
+    - name: Install distribution packages
+      ansible.builtin.dnf:
+        name:
+          - gcc
+          - make
+          - libxml2-devel
+          - libxslt-devel
+          - zlib-devel
+          - python3-devel
+          - python3-pip
+          - python3-psycopg2
+          - git
+          - nginx
+          - postgresql
+          - postgresql-server
+          - pandoc
+          - texlive-scheme-basic
+          - texlive-xetex
+          - texlive-lm
+          - librsvg2-tools
+          - certbot
+          - python3-certbot-nginx
+          - acl
+        state: present
 
-  - name: Install distribution packages
-    dnf:
-      name:
-      - gcc
-      - make
-      - libxml2-devel
-      - libxslt-devel
-      - zlib-devel
-      - python3-devel
-      - python3-pip
-      - python3-psycopg2
-      - git
-      - nginx
-      - postgresql
-      - postgresql-server
-      - pandoc
-      - texlive-scheme-basic
-      - texlive-xetex
-      - texlive-lm
-      - librsvg2-tools
-      - certbot
-      - python3-certbot-nginx
-      - acl
-      state: latest
+    - name: Initialize PostgreSQL database cluster
+      ansible.builtin.command:
+        cmd: postgresql-setup --initdb
+        creates: /var/lib/pgsql/data/PG_VERSION
 
-  - name: Initialize PostgreSQL database cluster
-    command:
-      cmd: postgresql-setup --initdb
-      creates: /var/lib/pgsql/data/PG_VERSION
+    - name: Enable and start PostgreSQL
+      ansible.builtin.systemd_service:
+        name: postgresql
+        enabled: true
+        state: started
 
-  - name: Enable and start PostgreSQL
-    systemd:
-      name: postgresql
-      enabled: true
-      state: started
+    - name: Enable and start nginx
+      ansible.builtin.systemd_service:
+        name: nginx
+        enabled: true
+        state: started
 
-  - name: Enable and start nginx
-    systemd:
-      name: nginx
-      enabled: true
-      state: started
+    - name: Create rdmo users
+      ansible.builtin.user:
+        name: "{{ item.user | default(rdmo_user) }}"
+        home: "{{ item.home | default(rdmo_home) }}"
+        comment: RDMO user
+        shell: /bin/bash
+        create_home: true
+        state: present
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.user | default(rdmo_user) }}"
 
-  - name: Create rdmo users
-    user:
-      name: "{{ item.user | default(rdmo_user) }}"
-      home: "{{ item.home | default(rdmo_home) }}"
-      comment: "RDMO user"
-      shell: /bin/bash
-      create_home: yes
-      state: present
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.user | default(rdmo_user) }}"
+    # nginx
 
-  # nginx
+    - name: Obtain certificates for RDMO sites
+      ansible.builtin.command:
+        cmd: >-
+          certbot certonly --nginx -d {{ item.host }} --non-interactive
+          --agree-tos --email {{ certbot_email }}
+        creates: "/etc/letsencrypt/live/{{ item.host }}/cert.pem"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.host }}"
 
-  - name: Obtain certificates for RDMO sites
-    command:
-      cmd: |
-        certbot certonly --standalone --nginx -d {{ item.host }}
-        --non-interactive --agree-tos --email {{ certbot_email }}
-      creates: /etc/letsencrypt/live/{{ item.host }}/cert.pem
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.host }}"
+    - name: Deploy nginx config files
+      ansible.builtin.template:
+        src: templates/rdmo.conf
+        dest: "/etc/nginx/conf.d/{{ rdmo_site.host }}.conf"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ rdmo_site.host }}"
+        loop_var: rdmo_site
+      notify: Restart nginx
 
-  - name: Deploy nginx config files
-    template:
-      src: templates/rdmo.conf
-      dest: "/etc/nginx/conf.d/{{ rdmo_site.host }}.conf"
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ rdmo_site.host }}"
-      loop_var: rdmo_site
-    notify: Restart nginx
+    # systemd
 
-  # systemd
+    - name: Deploy systemd service files
+      ansible.builtin.template:
+        src: templates/rdmo.service
+        dest: "/etc/systemd/system/{{ rdmo_site.service }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ rdmo_site.service }}"
+        loop_var: rdmo_site
+      notify: Restart rdmo
 
-  - name: Deploy systemd service files
-    template:
-      src: templates/rdmo.service
-      dest: "/etc/systemd/system/{{ rdmo_site.service }}.service"
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ rdmo_site.service }}"
-      loop_var: rdmo_site
-    notify: Restart rdmo
+    - name: Create log directories
+      ansible.builtin.file:
+        path: "/var/log/django/{{ item.service }}"
+        state: directory
+        owner: "{{ item.user | default(rdmo_user) }}"
+        group: "{{ item.user | default(rdmo_user) }}"
+        mode: "0755"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.service }}"
 
-  - name: Create log directories
-    file:
-      path: "/var/log/django/{{ item.service }}"
-      state: directory
-      owner: "{{ item.user | default(rdmo_user) }}"
-      group: "{{ item.user | default(rdmo_user) }}"
-      mode: '0755'
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.service }}"
+    # postgres
 
-  # postgres
+    - name: Create rdmo postgres users
+      become: true
+      become_user: postgres
+      community.postgresql.postgresql_user:
+        name: "{{ item.user | default(rdmo_user) }}"
+        role_attr_flags: CREATEDB,NOSUPERUSER
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.user | default(rdmo_user) }}"
 
-  - name: Create rdmo postgres users
-    become: true
-    become_user: postgres
-    postgresql_user:
-      name: "{{ item.user | default(rdmo_user) }}"
-      role_attr_flags: CREATEDB,NOSUPERUSER
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.user | default(rdmo_user) }}"
+    - name: Create rdmo postgres databases
+      become: true
+      become_user: postgres
+      community.postgresql.postgresql_db:
+        name: "{{ item.dbname | default(rdmo_dbname) }}"
+        owner: "{{ item.user | default(rdmo_user) }}"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.dbname | default(rdmo_dbname) }}"
 
-  - name: Create rdmo postgres databases
-    become: true
-    become_user: postgres
-    postgresql_db:
-      name: "{{ item.dbname | default(rdmo_dbname) }}"
-      owner: "{{ item.user | default(rdmo_user) }}"
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.dbname | default(rdmo_dbname) }}"
+    # rdmo-app
 
-  # rdmo-app
+    - name: Clone rdmo-app repositories
+      become: true
+      become_user: "{{ item.user | default(rdmo_user) }}"
+      ansible.builtin.git:
+        repo: "{{ item.app_repo | default(rdmo_app_repo) }}"
+        dest: "{{ item.app_path }}"
+        version: main
+        accept_hostkey: true
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.app_path }}"
 
-  - name: Clone rdmo-app repositories
-    become: yes
-    become_user: "{{ item.user | default(rdmo_user) }}"
-    git:
-      repo: "{{ item.app_repo | default(rdmo_app_repo) }}"
-      dest: "{{ item.app_path }}"
-      version: main
-      accept_hostkey: yes
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.app_path }}"
+    - name: Create virtual environments
+      become: true
+      become_user: "{{ item.user }}"
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ item.venv }}"
+        creates: "{{ item.venv }}/bin/activate"
+      loop: "{{ rdmo_virtualenvs_effective }}"
+      loop_control:
+        label: "{{ item.venv }}"
 
-  - name: Create virtual environments
-    become: yes
-    become_user: "{{ item.user }}"
-    command:
-      cmd: "python3 -m venv {{ item.venv }}"
-      creates: "{{ item.venv }}/bin/activate"
-    loop: "{{ rdmo_virtualenvs_effective }}"
-    loop_control:
-      label: "{{ item.venv }}"
+    - name: Upgrade pip inside virtualenvs
+      become: true
+      become_user: "{{ item.user }}"
+      ansible.builtin.pip:
+        name: pip
+        state: present
+        virtualenv: "{{ item.venv }}"
+        virtualenv_command: python3 -m venv
+      loop: "{{ rdmo_virtualenvs_effective }}"
+      loop_control:
+        label: "{{ item.venv }}"
 
-  - name: Upgrade pip inside virtualenvs
-    become: yes
-    become_user: "{{ item.user }}"
-    pip:
-      name: pip
-      state: latest
-      virtualenv: "{{ item.venv }}"
-      virtualenv_command: "python3 -m venv"
-    loop: "{{ rdmo_virtualenvs_effective }}"
-    loop_control:
-      label: "{{ item.venv }}"
+    - name: Install rdmo inside virtualenvs
+      become: true
+      become_user: "{{ item.user }}"
+      ansible.builtin.pip:
+        name: "{{ item.dist }}"
+        state: present
+        virtualenv: "{{ item.venv }}"
+        virtualenv_command: python3 -m venv
+      loop: "{{ rdmo_virtualenvs_effective }}"
+      loop_control:
+        label: "{{ item.venv }}"
 
-  - name: Install rdmo inside virtualenvs
-    become: yes
-    become_user: "{{ item.user }}"
-    pip:
-      name: "{{ item.dist }}"
-      state: latest
-      virtualenv: "{{ item.venv }}"
-      virtualenv_command: "python3 -m venv"
-    loop: "{{ rdmo_virtualenvs_effective }}"
-    loop_control:
-      label: "{{ item.venv }}"
+    - name: Deploy local.py config files
+      become: true
+      become_user: "{{ rdmo_site.user | default(rdmo_user) }}"
+      ansible.builtin.template:
+        src: templates/local.py
+        dest: "{{ rdmo_site.app_path }}/config/settings/local.py"
+        mode: "0640"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ rdmo_site.host }}"
+        loop_var: rdmo_site
 
-  - name: Deploy local.py config files
-    become: yes
-    become_user: "{{ rdmo_site.user | default(rdmo_user) }}"
-    template:
-      src: templates/local.py
-      dest: "{{ rdmo_site.app_path }}/config/settings/local.py"
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ rdmo_site.host }}"
-      loop_var: rdmo_site
+    # rdmo
 
-  # rdmo
-
-  - name: Init RDMO sites
-    become: yes
-    become_user: "{{ item.user | default(rdmo_user) }}"
-    command:
-      cmd: "{{ item.venv | default(rdmo_venv) }}/bin/python {{ item.app_path }}/manage.py upgrade"
-      creates: "{{ item.app_path }}/static_root"
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.host }}"
-    notify: Restart rdmo
+    - name: Init RDMO sites
+      become: true
+      become_user: "{{ item.user | default(rdmo_user) }}"
+      ansible.builtin.command:
+        cmd: "{{ item.venv | default(rdmo_venv) }}/bin/python {{ item.app_path }}/manage.py upgrade"
+        creates: "{{ item.app_path }}/static_root"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.host }}"
+      notify: Restart rdmo
 
   handlers:
+    - name: Restart nginx
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: restarted
 
-  - name: Restart nginx
-    systemd:
-      name: nginx
-      state: restarted
-
-  - name: Restart rdmo
-    systemd:
-      name: "{{ item.service }}"
-      enabled: true
-      daemon_reload: true
-      state: restarted
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.service }}"
+    - name: Restart rdmo
+      ansible.builtin.systemd_service:
+        name: "{{ item.service }}"
+        enabled: true
+        daemon_reload: true
+        state: restarted
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.service }}"
