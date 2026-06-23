@@ -22,11 +22,12 @@ provided URL.
 Setup
 -----
 
-Create a `hosts.yml` file with the hostname of your RDMO machine and other
-variables. The `rdmo_sites` list can contain any number of sites:
+Create a `hosts.yml` file with the hostname of your RDMO machine in either
+the `rhel9` or `almalinux9` inventory group and other variables. The
+`rdmo_sites` list can contain any number of sites:
 
 ```yml
-all:
+rhel9:
   hosts:
     rdmo.example.org:
   vars:
@@ -88,7 +89,7 @@ For single-site installations, the playbook remains compatible with the legacy
 variables:
 
 ```yml
-all:
+almalinux9:
   hosts:
     rdmo.jochenklar.dev:
   vars:
