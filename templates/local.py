@@ -1,16 +1,20 @@
 DEBUG = False
 
-SECRET_KEY = '{{ django_secret_key }}'
+SECRET_KEY = '{{ rdmo_site.django_secret_key | default(django_secret_key) }}'
 
-ALLOWED_HOSTS = ['{{ rdmo_host }}']
+ALLOWED_HOSTS = ['{{ rdmo_site.host }}']
 
+MULTISITE = {{ rdmo_site.multisite | default(rdmo_multisite | default(false)) | bool }}
+{% if rdmo_site.site_id is defined %}
+SITE_ID = {{ rdmo_site.site_id }}
+{% endif %}
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': '{{ rdmo_dbname }}'
+        'NAME': '{{ rdmo_site.dbname | default(rdmo_dbname) }}'
     }
 }
 
@@ -49,7 +53,7 @@ REST_FRAMEWORK.update({
     'ALLOWED_VERSIONS': ('v1', ),
 })
 
-LOGGING_PATH = '/var/log/django/{{ rdmo_service }}'
+LOGGING_PATH = '/var/log/django/{{ rdmo_site.service }}'
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': True,
