@@ -1,6 +1,6 @@
 ---
 
-- hosts: all
+- hosts: rhel9:almalinux9
 
   tasks:
 
@@ -36,26 +36,55 @@
     loop_control:
       label: "{{ item.venv | default(rdmo_venv) }}"
 
+  - name: Verify supported operating system
+    assert:
+      that:
+      - ansible_distribution in ['RedHat', 'AlmaLinux']
+      - ansible_distribution_major_version | int == 9
+      fail_msg: "This playbook targets RHEL 9 or AlmaLinux 9 hosts."
+      success_msg: "Target host is a supported RHEL 9 family system."
+
   - name: Install distribution packages
-    apt:
+    dnf:
       name:
-      - build-essential
-      - libxml2-dev
-      - libxslt-dev
-      - zlib1g-dev
-      - python3-dev
+      - gcc
+      - make
+      - libxml2-devel
+      - libxslt-devel
+      - zlib-devel
+      - python3-devel
       - python3-pip
-      - python3-venv
       - python3-psycopg2
       - git
       - nginx
       - postgresql
+      - postgresql-server
       - pandoc
-      - texlive
+      - texlive-scheme-basic
       - texlive-xetex
-      - lmodern
-      - librsvg2-bin
+      - texlive-lm
+      - librsvg2-tools
+      - certbot
+      - python3-certbot-nginx
+      - acl
       state: latest
+
+  - name: Initialize PostgreSQL database cluster
+    command:
+      cmd: postgresql-setup --initdb
+      creates: /var/lib/pgsql/data/PG_VERSION
+
+  - name: Enable and start PostgreSQL
+    systemd:
+      name: postgresql
+      enabled: true
+      state: started
+
+  - name: Enable and start nginx
+    systemd:
+      name: nginx
+      enabled: true
+      state: started
 
   - name: Create rdmo users
     user:
@@ -84,21 +113,11 @@
   - name: Deploy nginx config files
     template:
       src: templates/rdmo.conf
-      dest: "/etc/nginx/sites-available/{{ rdmo_site.host }}.conf"
+      dest: "/etc/nginx/conf.d/{{ rdmo_site.host }}.conf"
     loop: "{{ rdmo_sites_effective }}"
     loop_control:
       label: "{{ rdmo_site.host }}"
       loop_var: rdmo_site
-    notify: Restart nginx
-
-  - name: Enable nginx config files
-    file:
-      src: /etc/nginx/sites-available/{{ item.host }}.conf
-      dest: /etc/nginx/sites-enabled/{{ item.host }}.conf
-      state: link
-    loop: "{{ rdmo_sites_effective }}"
-    loop_control:
-      label: "{{ item.host }}"
     notify: Restart nginx
 
   # systemd
