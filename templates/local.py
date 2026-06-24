@@ -14,7 +14,8 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': '{{ rdmo_site.dbname | default(rdmo_dbname) }}'
+        'NAME': '{{ rdmo_site.dbname | default(rdmo_dbname) }}',
+        'USER': '{{ rdmo_site.dbuser | default(rdmo_dbuser | default(rdmo_user)) }}'
     }
 }
 

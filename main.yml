@@ -27,6 +27,10 @@
       ansible.builtin.set_fact:
         rdmo_virtualenvs_effective: []
 
+    - name: Configure unique RDMO database roles
+      ansible.builtin.set_fact:
+        rdmo_database_roles_effective: []
+
     - name: Add unique RDMO virtual environments
       ansible.builtin.set_fact:
         rdmo_virtualenvs_effective: >-
@@ -36,6 +40,15 @@
       loop: "{{ rdmo_sites_effective }}"
       loop_control:
         label: "{{ item.venv | default(rdmo_venv) }}"
+
+    - name: Add unique RDMO database roles
+      ansible.builtin.set_fact:
+        rdmo_database_roles_effective: >-
+          {{ rdmo_database_roles_effective + [{'dbuser': item.dbuser | default(rdmo_dbuser | default(rdmo_user))}] }}
+      when: (item.dbuser | default(rdmo_dbuser | default(rdmo_user))) not in (rdmo_database_roles_effective | map(attribute='dbuser') | list)
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.dbuser | default(rdmo_dbuser | default(rdmo_user)) }}"
 
     - name: Verify supported operating system
       ansible.builtin.assert:
@@ -156,18 +169,18 @@
       become: true
       become_user: postgres
       community.postgresql.postgresql_user:
-        name: "{{ item.user | default(rdmo_user) }}"
+        name: "{{ item.dbuser }}"
         role_attr_flags: CREATEDB,NOSUPERUSER
-      loop: "{{ rdmo_sites_effective }}"
+      loop: "{{ rdmo_database_roles_effective }}"
       loop_control:
-        label: "{{ item.user | default(rdmo_user) }}"
+        label: "{{ item.dbuser }}"
 
     - name: Create rdmo postgres databases
       become: true
       become_user: postgres
       community.postgresql.postgresql_db:
         name: "{{ item.dbname | default(rdmo_dbname) }}"
-        owner: "{{ item.user | default(rdmo_user) }}"
+        owner: "{{ item.dbuser | default(rdmo_dbuser | default(rdmo_user)) }}"
       loop: "{{ rdmo_sites_effective }}"
       loop_control:
         label: "{{ item.dbname | default(rdmo_dbname) }}"

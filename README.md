@@ -37,6 +37,7 @@ rhel9:
     rdmo_home: /srv/rdmo
     rdmo_venv: /srv/rdmo/env
     rdmo_dbname: rdmo
+    rdmo_dbuser: rdmo
     rdmo_multisite: true
 
     rdmo_sites:
@@ -77,13 +78,17 @@ shown above:
   environment across multiple RDMO app directories.
 * `dbname`: defaults to `rdmo_dbname`. Multisite installations usually share
   one database across all sites.
+* `dbuser`: defaults to `rdmo_dbuser` and then `rdmo_user`. Use the common
+  global `rdmo_dbuser` for sites that share the same database.
 * `multisite`: defaults to `rdmo_multisite` and controls `MULTISITE` in the
   rendered Django settings.
 
 In a multisite installation, every site has its own `rdmo-app` directory and
 `local.py`, while sites can share a common virtual environment and database. The
 playbook therefore creates and installs each unique virtual environment only once
-and reuses it for all sites that reference the same `venv` path.
+and reuses it for all sites that reference the same `venv` path. PostgreSQL roles
+are also deduplicated by `dbuser`, so shared databases can use one common role
+instead of making a site-specific system user the database owner.
 
 For single-site installations, the playbook remains compatible with the legacy
 variables:
@@ -99,6 +104,7 @@ almalinux9:
     rdmo_host: rdmo.jochenklar.dev
     rdmo_service: rdmo
     rdmo_dbname: rdmo
+    rdmo_dbuser: rdmo
     rdmo_dist: rdmo[allauth,postgres,openapi,gunicorn]
     rdmo_user: rdmo
     rdmo_home: /srv/rdmo
