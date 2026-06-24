@@ -130,9 +130,63 @@
       loop_control:
         label: "{{ item.host }}"
 
+    - name: Check for existing RDMO certificates
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ item.host }}/cert.pem"
+      loop: "{{ rdmo_sites_effective }}"
+      loop_control:
+        label: "{{ item.host }}"
+      register: rdmo_certificate_stats
+
+    - name: Create Let's Encrypt configuration directory
+      ansible.builtin.file:
+        path: /etc/letsencrypt
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy Certbot nginx SSL options file
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/options-ssl-nginx.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # This file contains important security parameters. If you modify this file
+          # manually, Certbot will be unable to automatically provide future security
+          # updates. Instead, Certbot will print and log an error message with a path to
+          # the up-to-date file that you will need to refer to when manually updating
+          # this file. Contents are based on https://ssl-config.mozilla.org
+
+          ssl_session_cache shared:le_nginx_SSL:10m;
+          ssl_session_timeout 1440m;
+          ssl_session_tickets off;
+
+          ssl_protocols TLSv1.2 TLSv1.3;
+          ssl_prefer_server_ciphers off;
+
+          ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+
+    - name: Deploy Certbot SSL DH parameters file
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/ssl-dhparams.pem
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          -----BEGIN DH PARAMETERS-----
+          MIIBCAKCAQEA//////////+t+FRYortKmq/cViAnPTzx2LnFg84tNpWp4TZBFGQz
+          +8yTnc4kmz75fS/jY2MMddj2gbICrsRhetPfHtXV/WVhJDP1H18GbtCFY2VVPe0a
+          87VXE15/V8k1mE8McODmi3fipona8+/och3xWKE2rec1MKzKT0g6eXq8CrGCsyT7
+          YdEIqUuyyOP7uWrat2DX9GgdT0Kj3jlN9K5W7edjcrsZCwenyO4KbXCeAvzhzffi
+          7MA0BM0oNC9hkXL+nOmFg/+OTxIy7vKBg8P+OxtMb61zO7X8vC7CIAXFjvGDfRaD
+          ssbzSibBsu/6iGtCOGEoXJf//////////wIBAg==
+          -----END DH PARAMETERS-----
+
     - name: Deploy temporary nginx webroot config files
       ansible.builtin.copy:
-        dest: "/etc/nginx/conf.d/{{ item.host }}.conf"
+        dest: "/etc/nginx/conf.d/{{ item.item.host }}.acme.conf"
         owner: root
         group: root
         mode: "0644"
@@ -140,21 +194,22 @@
           server {
               listen 80;
               listen [::]:80;
-              server_name {{ item.host }};
+              server_name {{ item.item.host }};
 
-              root /var/www/{{ item.host }};
+              root /var/www/{{ item.item.host }};
 
               location /.well-known/acme-challenge/ {
-                  root /var/www/{{ item.host }};
+                  root /var/www/{{ item.item.host }};
               }
 
               location / {
                   return 404;
               }
           }
-      loop: "{{ rdmo_sites_effective }}"
+      when: not item.stat.exists
+      loop: "{{ rdmo_certificate_stats.results }}"
       loop_control:
-        label: "{{ item.host }}"
+        label: "{{ item.item.host }}"
       notify: Restart nginx
 
     - name: Flush handlers before obtaining certificates
@@ -163,12 +218,23 @@
     - name: Obtain certificates for RDMO sites
       ansible.builtin.command:
         cmd: >-
-          certbot certonly --webroot --webroot-path /var/www/{{ item.host }}
-          -d {{ item.host }} --non-interactive --agree-tos --email {{ certbot_email }}
-        creates: "/etc/letsencrypt/live/{{ item.host }}/cert.pem"
-      loop: "{{ rdmo_sites_effective }}"
+          certbot certonly --webroot --webroot-path /var/www/{{ item.item.host }}
+          -d {{ item.item.host }} --non-interactive --agree-tos --email {{ certbot_email }}
+        creates: "/etc/letsencrypt/live/{{ item.item.host }}/cert.pem"
+      when: not item.stat.exists
+      loop: "{{ rdmo_certificate_stats.results }}"
       loop_control:
-        label: "{{ item.host }}"
+        label: "{{ item.item.host }}"
+
+    - name: Remove temporary nginx webroot config files
+      ansible.builtin.file:
+        path: "/etc/nginx/conf.d/{{ item.item.host }}.acme.conf"
+        state: absent
+      when: not item.stat.exists
+      loop: "{{ rdmo_certificate_stats.results }}"
+      loop_control:
+        label: "{{ item.item.host }}"
+      notify: Restart nginx
 
     - name: Deploy nginx config files
       ansible.builtin.template:
@@ -182,6 +248,9 @@
         label: "{{ rdmo_site.host }}"
         loop_var: rdmo_site
       notify: Restart nginx
+
+    - name: Flush handlers after deploying nginx configs
+      ansible.builtin.meta: flush_handlers
 
     # systemd
 
